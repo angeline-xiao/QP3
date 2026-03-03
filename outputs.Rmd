@@ -1,0 +1,196 @@
+---
+title: "Testing"
+author: "Angeline"
+date: "2026-02-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+#source("ccw_sim.R")
+source("ccw.R")
+```
+
+```{r}
+data_alpha0 = ccw_sim(2000, p_e = 1/90, p_m = 1/30, alpha = 0)
+
+#plot of weights 
+ggplot(data_alpha0$dataccw %>% filter(uncensored == T)) + 
+  geom_histogram(aes(weights, fill = factor(time)), bins = 30) + 
+  labs( title = "Weights by time when alpha = 0")
+
+#pooled logistic model where alpha is 0 applied to the regular dataset
+model_ccw_alpha0 = glm(death ~ exposed*factor(time),
+                        family = "quasibinomial",
+                        data = data_alpha0$dataccw %>% filter(uncensored == T),
+                        weights = weights
+)
+
+summary(model_ccw_alpha0)
+
+
+coef = p_log_ccw_alpha0$coefficients
+outputs = function(t, anal)
+
+#remove exposure as a predictor
+#comparing analytical answer to when we just get rid of exposure
+
+p_log_ccw_alpha0 = glm(death ~ factor(time),
+                        family = "quasibinomial",
+                        data = data_alpha0$dataccw %>% filter(uncensored == T),
+                        weights = weights
+)
+summary(p_log_ccw_alpha0)
+coef = p_log_ccw_alpha0$coefficients
+# Time points
+times = c(30, 60, 90, 120, 150)
+
+# Fit CCW model in the case where alpha = 0 without exposure as a predictor
+p_log_ccw_alpha0 = glm(
+  death ~ factor(time),
+  family = "quasibinomial",
+  data = data_alpha0$dataccw %>% filter(uncensored == TRUE),
+  weights = weights
+)
+
+summary(p_log_ccw_alpha0)
+coef_ccw = p_log_ccw_alpha0$coefficients
+
+# Create the output dataframe that holds the probabilities
+output = data.frame(
+  t = times,
+  CCW = numeric(length(times)),
+  Analytical = numeric(length(times)),
+  NoCCW = numeric(length(times))
+)
+
+# We can use the function P_M_beforeat_t_given_noE (terrible name sorry) to 
+#evaluate the analytical form of the probabilities 
+
+#We use the get_cumulative_prob function to find the same values for the CCW columns
+for (i in seq_along(times)) {
+  current_t = times[i]
+  cumulative_times = times[1:i]
+  
+  output[i, "Analytical"] = P_M_beforeat_t_given_noE(
+    t = current_t,
+    y = 90,
+    p_e = 1/90,
+    p_m = 1/30,
+    alpha = 0
+  )
+  
+  output[i, "CCW"] = get_cumulative_prob(
+    coef_ccw,
+    exposed = FALSE,
+    t = cumulative_times
+  )
+}
+
+# Now we can fit a non-CCW model so we can also compare its probability estimates
+p_log_alpha0 = glm(
+  death ~ factor(time),
+  family = "quasibinomial",
+  data = data_alpha0$data
+)
+
+summary(p_log_alpha0)
+coef_noCCW = p_log_alpha0$coefficients
+
+#Same as above
+for (i in seq_along(times)) {
+  output[i, "NoCCW"] = get_cumulative_prob(
+    coef_noCCW,
+    exposed = FALSE,
+    t = times[1:i]
+  )
+}
+```
+
+```{r}
+data_alpha31 = ccw_sim(2000, p_e = 1/90, p_m = 1/30, alpha = -1/31)
+
+# Fit the CCW model with the data simulated with a new alpha value
+p_log_ccw_alpha31 = glm(
+  death ~ exposed * factor(time),
+  family = "quasibinomial",
+  data = data_alpha31$dataccw %>% filter(uncensored == TRUE),
+  weights = weights
+)
+
+coef_ccw = p_log_ccw_alpha31$coefficients
+
+# Create the output dataframe that holds the probabilities
+n = length(times)
+output2 = data.frame(
+  t = times,
+  Analytical_E1 = numeric(n),
+  Analytical_E0 = numeric(n),
+  CCW_E1 = numeric(n),
+  CCW_E0 = numeric(n),
+  noCCW_E1 = numeric(n),
+  noCCW_E0 = numeric(n)
+)
+
+
+# We can use the function P_M_beforeat_t_given_E_beforeat_y to 
+#evaluate the analytical form of the cumulative probability given that A = 1, (individual is exposed)
+#We can use the P_M_beforeat_t_given_noE to evaluate the cumulative prob given that A = 0
+
+#We use the get_cumulative_prob function to find the same values for the CCW columns, specifying if exposed is TRUE or FALSE
+
+for (i in seq_along(times)) {
+
+  current_t = times[i]
+  cumulative_times = times[1:i]
+
+  # Analytical
+  output2[i, "Analytical_E0"] =
+    P_M_beforeat_t_given_noE(
+      t = current_t,
+      y = 90,
+      p_e = 1/90,
+      p_m = 1/30,
+      alpha = -1/31
+    )
+
+  output2[i, "Analytical_E1"] =
+    P_M_beforeat_t_given_E_beforeat_y(
+      t = current_t,
+      y = 90,
+      p_e = 1/90,
+      p_m = 1/30,
+      alpha = -1/31
+    )
+
+  output2[i, "CCW_E0"] =
+    get_cumulative_prob(coef_ccw, exposed = FALSE, t = cumulative_times)
+
+  output2[i, "CCW_E1"] =
+    get_cumulative_prob(coef_ccw, exposed = TRUE, t = cumulative_times)
+}
+
+#fit the model against the non CCW treated data
+p_log_alpha31 = glm(
+  death ~ exposed * factor(time),
+  family = "quasibinomial",
+  data = data_alpha31$data
+)
+
+coef_noCCW = p_log_alpha31$coefficients
+
+#Using get_cumulative_prob to the probability estimate
+for (i in seq_along(times)) {
+
+  cumulative_times = times[1:i]
+
+  output2[i, "noCCW_E0"] =
+    get_cumulative_prob(coef_noCCW, exposed = FALSE, t = cumulative_times)
+
+  output2[i, "noCCW_E1"] =
+    get_cumulative_prob(coef_noCCW, exposed = TRUE, t = cumulative_times)
+}
+
+
+```
